@@ -2,7 +2,7 @@ from functools import reduce
 # from itertools import chain
 from random import random, randint, uniform
 
-from math import ceil, floor
+from math import ceil
 import os
 from PIL import Image, ImageDraw
 import numpy as np
@@ -71,9 +71,15 @@ class Nonogram(object):
     Includes methods for easy fitness calculation, encoding and condensed
     encoding """
 
-    def __init__(self, row_constraints, column_constraints, grid=None):
+    def __init__(self,
+                 row_constraints,
+                 column_constraints,
+                 row_flag=True,
+                 grid=None):
         """ Return nonogram individual with size of len(nonogram_constraints)
-        """
+
+        If grid is not supplied, generates grid with either row's segmentation
+        solved when row_flag=True, or columns sovled when row_flag=False"""
         # self.row_constraints = row_constraints
         # self.column_constraints = column_constraints
         # Note that grid_width constraints corresponds to number of
@@ -81,8 +87,16 @@ class Nonogram(object):
         self.grid_width = len(column_constraints)
         self.grid_height = len(row_constraints)
         if grid is None:
-            self.grid = Nonogram.create_rand_grid(row_constraints,
-                                                  self.grid_width)
+            if row_flag:
+                self.grid = Nonogram.create_rand_grid(row_constraints,
+                                                      self.grid_width)
+            else:
+                # this will create a grid with solved columns then get a
+                # transpose of that matrix to get it in list of rows form
+                self.grid = list(
+                    map(list,
+                        zip(*Nonogram.create_rand_grid(column_constraints,
+                                                       self.grid_height))))
         else:
             self.grid = grid
         self.fitness = Nonogram.calc_fitness(self.grid, column_constraints)
