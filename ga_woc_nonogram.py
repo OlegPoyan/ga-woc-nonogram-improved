@@ -52,22 +52,14 @@ EMPTY = 0
 ROW_MODE = 1
 COL_MODE = 2
 RAND_MODE = 0
-# GA & WOC related global parameters
-SQUARE_PENALTY = 1
-GROUP_PENALTY = 6
 
-POPULATION_SIZE = 3000
+# GA & WOC related global parameters
+POPULATION_SIZE = 1000
 GEN_ITERATIONS = 100
 REJECTION_PERCENTAGE = .1
 CROSSOVER_RATE = 0.9
 MUTATION_RATE = 0.05
 THRESHOLD = 0.7
-
-# in order to use roullete wheel select we need to convert to maximization
-# problem. This variable allows for that.
-WORST_POSSIBLE_FIT = len(COL_CONSTRAINTS) * (
-    SQUARE_PENALTY * len(ROW_CONSTRAINTS) +
-    GROUP_PENALTY * ceil(len(ROW_CONSTRAINTS) / 2))
 
 
 class Nonogram(object):
@@ -76,7 +68,12 @@ class Nonogram(object):
     encoding. Based on the mode, grid can be either list of rows, or list of
     columns."""
 
-    def __init__(self, row_constraints, col_constraints, mode, grid=None):
+    def __init__(self,
+                 row_constraints,
+                 col_constraints,
+                 mode,
+                 weights,
+                 grid=None):
         """ Return nonogram individual with size of len(nonogram_constraints)
 
         If grid is not supplied, generates grid with either row's segmentation
@@ -88,6 +85,9 @@ class Nonogram(object):
         # column constraints given, the opposite applies to grid_height
         self.grid_width = len(col_constraints)
         self.grid_height = len(row_constraints)
+        self.row_constraints = row_constraints
+        self.col_constraints = col_constraints
+        self.weights = weights
         if grid is None:
             if mode is ROW_MODE:
                 self.grid = Nonogram.create_bias_rand_grid(
@@ -104,8 +104,8 @@ class Nonogram(object):
         else:
             self.grid = grid
             self.mode = mode
-        self.fitness = Nonogram.calc_fitness(self.grid, row_constraints,
-                                             col_constraints, self.mode)
+        self.fitness = Nonogram.calc_fitness(
+            self.grid, row_constraints, col_constraints, self.mode, weights)
 
     @staticmethod
     def generate_seg_line(constraints_i, length):
@@ -175,8 +175,10 @@ class Nonogram(object):
                 for y in range(0, grid_height)]
 
     @staticmethod
-    def calc_bias_fitness(grid, constraints):
+    def calc_bias_fitness(grid, constraints, weights):
         """Returns total fitnes score of just one dimension."""
+        SQUARE_PENALTY = weights[0]
+        GROUP_PENALTY = weights[1]
 
         score = 0
         for index, row in enumerate(grid):
@@ -210,7 +212,7 @@ class Nonogram(object):
         return score
 
     @staticmethod
-    def calc_fitness(grid, row_constraints, col_constraints, mode):
+    def calc_fitness(grid, row_constraints, col_constraints, mode, weights):
         """ Returns the fitness score for a particular grid
 
         Depending on the mode, calculates either row_fitness, col_fitness, or
@@ -219,10 +221,10 @@ class Nonogram(object):
         # dimension
         if (mode is ROW_MODE):
             return Nonogram.calc_bias_fitness(
-                list(map(list, zip(*grid))), col_constraints)
+                list(map(list, zip(*grid))), col_constraints, weights)
         elif (mode is COL_MODE):
             return Nonogram.calc_bias_fitness(
-                list(map(list, zip(*grid))), row_constraints)
+                list(map(list, zip(*grid))), row_constraints, weights)
         else:
             # in a case when mode=None, we can use calc_bias_fitness() to
             # calculate both col_fitness and row_fitnes of a grid
@@ -231,8 +233,9 @@ class Nonogram(object):
             return Nonogram.calc_bias_fitness(
                 # transpose of a grid
                 list(map(list, zip(*grid))),
-                col_constraints) + Nonogram.calc_bias_fitness(
-                    grid, row_constraints)
+                col_constraints,
+                weights) + Nonogram.calc_bias_fitness(grid, row_constraints,
+                                                      weights)
 
     def draw_nonogram(self):
         """ Create an PNG format image of grid"""
@@ -269,48 +272,50 @@ def draw_population(population, path, filename):
         # print("Board #" + str(index) + " " + str(board.fitness))
 
 
-def create_population(population_size, row_constraints, col_constraints, mode):
+def create_population(population_size, row_constraints, col_constraints, mode,
+                      weights):
     """Returns a list of nonogram grids"""
     return [
-        Nonogram(row_constraints, col_constraints, mode=mode)
+        Nonogram(row_constraints, col_constraints, mode, weights)
         for x in range(0, population_size)
     ]
 
 
-def roulette_wheel_select(candidates):
+def roulette_wheel_select(candidates, worst_possible_fit):
     """ Returns an individual from population and its index in a list.
     The chance of being selected is proportional to the individual fitness."""
     # convert to maximization problem
     # to do that I aproximized worst_possbile_fitness to be
 
     roullete_range = sum(
-        WORST_POSSIBLE_FIT - chromosome.fitness for chromosome in candidates)
+        worst_possible_fit - chromosome.fitness for chromosome in candidates)
     roullete_pick = uniform(0, roullete_range)
     current = 0
     for chromosome in candidates:
-        current += WORST_POSSIBLE_FIT - chromosome.fitness
+        current += worst_possible_fit - chromosome.fitness
         if current > roullete_pick:
             return chromosome
 
 
-def mate(candidates, row_constraints, col_constraints, mode):
+def mate(candidates, mode, worst_possible_fit):
     """ Returns 2 offsprings by mating 2 randomly choosen candidates.
     Make sure pass a copy of a list. """
 
-    # print(candidates)
-
     # randomly choose 2 candidates, remover selected from candidates to
     # prevent mating 2 identical chromosomes
-    candidate1 = roulette_wheel_select(candidates)
+    candidate1 = roulette_wheel_select(candidates, worst_possible_fit)
+    row_constraints = candidate1.row_constraints
+    col_constraints = candidate1.col_constraints
+    weights = candidate1.weights
     candidates.remove(candidate1)
-    candidate2 = roulette_wheel_select(candidates)
+    candidate2 = roulette_wheel_select(candidates, worst_possible_fit)
 
     offspring1, offspring2 = single_point_crossover(candidate1.grid,
                                                     candidate2.grid)
     board1 = Nonogram(
-        row_constraints, col_constraints, mode, grid=offspring1)
+        row_constraints, col_constraints, mode, weights, grid=offspring1)
     board2 = Nonogram(
-        row_constraints, col_constraints, mode, grid=offspring2)
+        row_constraints, col_constraints, mode, weights, grid=offspring2)
     if board1.fitness < board2.fitness:
         return board1
     else:
@@ -373,19 +378,27 @@ def population_metrics(boards, generation):
     file.close()
 
 
-def ga_algorithm(population_size, row_constraints, col_constraints, mode):
+def ga_algorithm(population_size, row_constraints, col_constraints, mode,
+                 run_name, weights):
     """ga algorithm to find a solution for Nonogram puzzle. Depending on the
     mode selected generates populations either with solved rows, column, or
     generates random grids if mode=None"""
 
-    # Start timer to measure performance
-    t0 = time.time()
-
     population = create_population(population_size, row_constraints,
-                                   col_constraints, mode)
+                                   col_constraints, mode, weights)
+
+    # in order to use roullete wheel select we need to convert to maximization
+    # problem. This variable allows for that.
+    worst_possible_fit = (len(col_constraints) *
+                          (weights[0] * len(row_constraints) +
+                           weights[1] * ceil(len(row_constraints) / 2)) +
+                          (len(row_constraints) *
+                           (weights[0] * len(col_constraints) +
+                            weights[1] * ceil(len(col_constraints) / 2))))
 
     population.sort(key=lambda individual: individual.fitness)
-    draw_population(population, 'pics/gen_0/population/', 'nono')
+    draw_population(population, 'pics/' + run_name + '/gen_0/population/',
+                    'nono')
     population_metrics(population, 0)
 
     for i in range(0, GEN_ITERATIONS):
@@ -398,11 +411,9 @@ def ga_algorithm(population_size, row_constraints, col_constraints, mode):
         # Create new chromosomes until reaching POPUlATION_SIZE
         next_gen = []
         # print("GEN", i)
-        while len(next_gen) < population_size:
+        while len(next_gen) < len(population):
             if random() > CROSSOVER_RATE:
-                next_gen.append(
-                    mate(population[:], row_constraints, col_constraints,
-                         mode))
+                next_gen.append(mate(population[:], mode, worst_possible_fit))
         # print("Create Adj Matrix\n")
         # adj_matrix = wisdom_of_crowds(population)
         # print(adj_matrix)
@@ -418,21 +429,56 @@ def ga_algorithm(population_size, row_constraints, col_constraints, mode):
         # draw_population(next_gen, path + 'population/', 'nono')
         population = next_gen
 
-    draw_population(next_gen, 'pics/last_gen/population/', 'nono')
+    draw_population(next_gen, 'pics/' + run_name + '/last_gen/population/',
+                    'nono')
+
+
+def ga_woc(population_size, row_constraints, col_constraints):
+    """ Algorithm that combines Genetic Algorithm and Wisdom of Crowds to find
+    best solution for a nonogram puzzle
+
+    Calls ga_algorithm() n times to create n different solutions then calls woc
+    to aggreate solutions.
+
+    Warning: this method alters GROUP_PENALTY and SQUARE_PENALTY global
+    variables"""
+
+    # Start timer to measure performance
+    t0 = time.time()
+
+    for i in range(1):
+        ga_algorithm(population_size, row_constraints, col_constraints,
+                     ROW_MODE,
+                     str(i) + '_ga_row_group', (1, 10))
+        ga_algorithm(population_size, row_constraints, col_constraints,
+                     ROW_MODE,
+                     str(i) + '_ga_row_scater', (10, 1))
+        ga_algorithm(population_size, row_constraints, col_constraints,
+                     COL_MODE,
+                     str(i) + '_ga_col_group', (1, 10))
+        ga_algorithm(population_size, row_constraints, col_constraints,
+                     COL_MODE,
+                     str(i) + '_ga_col_scater', (10, 1))
+        ga_algorithm(population_size, row_constraints, col_constraints,
+                     RAND_MODE,
+                     str(i) + '_ga_rand_group', (1, 10))
+        ga_algorithm(population_size, row_constraints, col_constraints,
+                     RAND_MODE,
+                     str(i) + '_ga_rand_scater', (10, 1))
 
     t1 = time.time()
     file = open('nonogram.log', 'a')
     file.write("Running time: " + str(t1 - t0) + "\n")
-    file.write("POPULATION GENERATION METHOD " + str(mode) + "\n")
+    # file.write("POPULATION GENERATION METHOD " + str(mode) + "\n")
     file.write("POPULATION_SIZE " + str(POPULATION_SIZE) + "\n")
     file.write("GEN_ITERATIONS " + str(GEN_ITERATIONS) + "\n")
     # file.write("REJECTION_RATE " + str(REJECTION_PERCENTAGE) + "\n")
     file.write("MUTATION_RATE " + str(MUTATION_RATE) + "\n")
-    file.write("\nSQUARE_PENALTY " + str(SQUARE_PENALTY) + "\n")
-    file.write("GROUP_PENALTY " + str(GROUP_PENALTY) + "\n")
+    # file.write("\nSQUARE_PENALTY " + str(SQUARE_PENALTY) + "\n")
+    # file.write("GROUP_PENALTY " + str(GROUP_PENALTY) + "\n")
     file.write("WISDOM_TRHESHOLD " + str(THRESHOLD) + "\n")
     file.write("END RUN\n\n")
     file.close()
 
 
-ga_algorithm(POPULATION_SIZE, ROW_CONSTRAINTS, COL_CONSTRAINTS, mode=ROW_MODE)
+ga_woc(POPULATION_SIZE, ROW_CONSTRAINTS, COL_CONSTRAINTS)
