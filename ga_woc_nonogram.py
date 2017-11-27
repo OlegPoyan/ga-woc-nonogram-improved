@@ -47,19 +47,33 @@ COL_CONSTRAINTS = [
 
 FILLED = 1
 EMPTY = 0
+UNDECIDED = 2
 
 # Designates possible modes of GA algorithm
 ROW_MODE = 1
 COL_MODE = 2
 RAND_MODE = 0
+SCATER_MODE = (10, 1)
+GROUP_MODE = (1, 10)
+# Use this mode only outside GA algorithms
+EVAL_MODE = (1, 1)
 
 # GA & WOC related global parameters
-POPULATION_SIZE = 1000
-GEN_ITERATIONS = 100
-REJECTION_PERCENTAGE = .1
+POPULATION_SIZE = 100
+GEN_ITERATIONS = 30
+EXPERT_THRESHOLD = .1
 CROSSOVER_RATE = 0.9
 MUTATION_RATE = 0.05
-THRESHOLD = 0.7
+WOAC_UPPER_THRESHOLD = 0.5
+WOAC_LOWER_THRESHOLD = 0.5
+
+mode_dict_g = {
+    RAND_MODE: "RAND_MODE",
+    ROW_MODE: "ROW_MODE",
+    COL_MODE: "COL_MODE",
+    GROUP_MODE: "GROUP_MODE",
+    SCATER_MODE: "SCATER_MODE"
+}
 
 
 class Nonogram(object):
@@ -257,8 +271,10 @@ class Nonogram(object):
             coord = [(x * 10, y * 10), ((x + 1) * 10, (y + 1) * 10)]
             if square == EMPTY:
                 draw.rectangle(coord, fill=(255, 255, 255))
-            if square == FILLED:
+            elif square == FILLED:
                 draw.rectangle(coord, fill=(0, 0, 0))
+            elif square == UNDECIDED:
+                draw.rectangle(coord, fill=(255, 102, 153))
         return image
 
 
@@ -384,6 +400,12 @@ def ga_algorithm(population_size, row_constraints, col_constraints, mode,
     mode selected generates populations either with solved rows, column, or
     generates random grids if mode=None"""
 
+    file = open('nonogram.log', 'a')
+    file.write("START GA RUN\nGA mode: " + mode_dict_g[mode] + " " +
+               mode_dict_g[weights] + "\n")
+    file.close()
+    t0 = time.time()
+
     population = create_population(population_size, row_constraints,
                                    col_constraints, mode, weights)
 
@@ -402,9 +424,6 @@ def ga_algorithm(population_size, row_constraints, col_constraints, mode,
     population_metrics(population, 0)
 
     for i in range(0, GEN_ITERATIONS):
-        # print("Rejecting unfit candidates \n")
-        # population = population[0:floor((
-        #     1 - REJECTION_PERCENTAGE) * len(population))]
         # path = 'pics/gen_' + str(i) + '/'
         # draw_population(population, path + 'fit_population/', 'fit_nono')
 
@@ -414,26 +433,45 @@ def ga_algorithm(population_size, row_constraints, col_constraints, mode,
         while len(next_gen) < len(population):
             if random() > CROSSOVER_RATE:
                 next_gen.append(mate(population[:], mode, worst_possible_fit))
-        # print("Create Adj Matrix\n")
-        # adj_matrix = wisdom_of_crowds(population)
-        # print(adj_matrix)
-        # board = Nonogram()
-        # board.grid = wisdom_create_board(adj_matrix, THRESHOLD)
-        # board.fitness = Nonogram.calc_fitness(board)
-        # next_gen.append(board)
+
         next_gen.sort(key=lambda individual: individual.fitness)
-        # print("Create new board and extend to population")
-        # print("NEW POPULATION")
         population_metrics(next_gen, i + 1)
-        # path = 'pics/gen_' + str(i + 1) + '/'
-        # draw_population(next_gen, path + 'population/', 'nono')
         population = next_gen
+
+    t1 = time.time()
+    file = open('nonogram.log', 'a')
+    file.write("Running time: " + str(t1 - t0) + "\n")
+    file.close()
 
     draw_population(next_gen, 'pics/' + run_name + '/last_gen/population/',
                     'nono')
+    return population[:int(EXPERT_THRESHOLD * (len(population)))]
 
 
-def ga_woc(population_size, row_constraints, col_constraints):
+def woac_aggregate(crowd):
+    """Returns grid filled with percentages of squares crowd aggrees or not
+    agrees on"""
+    row_constraints = crowd[0].row_constraints
+    col_constraints = crowd[0].col_constraints
+    arr = np.array([
+        list(map(list, zip(*solution.grid)))
+        if solution.mode is COL_MODE else solution.grid for solution in crowd
+    ])
+    adj_grid = np.mean(arr, axis=0)
+    print(adj_grid)
+    new_solution = [[
+        FILLED if x > WOAC_UPPER_THRESHOLD else EMPTY
+        if x < WOAC_LOWER_THRESHOLD else UNDECIDED for x in row
+    ] for row in adj_grid]
+    return Nonogram(
+        row_constraints,
+        col_constraints,
+        RAND_MODE,
+        EVAL_MODE,
+        grid=new_solution)
+
+
+def ga_woac(population_size, row_constraints, col_constraints):
     """ Algorithm that combines Genetic Algorithm and Wisdom of Crowds to find
     best solution for a nonogram puzzle
 
@@ -446,39 +484,56 @@ def ga_woc(population_size, row_constraints, col_constraints):
     # Start timer to measure performance
     t0 = time.time()
 
-    for i in range(1):
-        ga_algorithm(population_size, row_constraints, col_constraints,
-                     ROW_MODE,
-                     str(i) + '_ga_row_group', (1, 10))
-        ga_algorithm(population_size, row_constraints, col_constraints,
-                     ROW_MODE,
-                     str(i) + '_ga_row_scater', (10, 1))
-        ga_algorithm(population_size, row_constraints, col_constraints,
-                     COL_MODE,
-                     str(i) + '_ga_col_group', (1, 10))
-        ga_algorithm(population_size, row_constraints, col_constraints,
-                     COL_MODE,
-                     str(i) + '_ga_col_scater', (10, 1))
-        ga_algorithm(population_size, row_constraints, col_constraints,
-                     RAND_MODE,
-                     str(i) + '_ga_rand_group', (1, 10))
-        ga_algorithm(population_size, row_constraints, col_constraints,
-                     RAND_MODE,
-                     str(i) + '_ga_rand_scater', (10, 1))
+    solutions = []
+    for i in range(5):
+
+        solutions.extend(
+            ga_algorithm(population_size, row_constraints, col_constraints,
+                         ROW_MODE,
+                         str(i) + '_ga_row_group', GROUP_MODE))
+        solutions.extend(
+            ga_algorithm(population_size, row_constraints, col_constraints,
+                         ROW_MODE,
+                         str(i) + '_ga_row_scater', SCATER_MODE))
+        solutions.extend(
+            ga_algorithm(population_size, row_constraints, col_constraints,
+                         COL_MODE,
+                         str(i) + '_ga_col_group', GROUP_MODE))
+        solutions.extend(
+            ga_algorithm(population_size, row_constraints, col_constraints,
+                         COL_MODE,
+                         str(i) + '_ga_col_scater', SCATER_MODE))
+        # solutions.extend(
+        #     ga_algorithm(population_size, row_constraints, col_constraints,
+        #                  RAND_MODE,
+        #                  str(i) + '_ga_rand_group', GROUP_MODE))
+        # solutions.extend(
+        #     ga_algorithm(population_size, row_constraints, col_constraints,
+        #                  RAND_MODE,
+        #                  str(i) + '_ga_rand_scater', SCATER_MODE))
+
+    file = open('nonogram.log', 'a')
+    for i, board in enumerate(solutions):
+        board.fitnes = Nonogram.calc_fitness(
+            board.grid, row_constraints, col_constraints, board.mode, (1, 1))
+        file.write("BOARD " + str(i) + " " + mode_dict_g[board.mode] + " " +
+                   str(board.fitnes) + '\n')
+
+    adj_nonogram = woac_aggregate(solutions)
+    adj_nonogram.draw_nonogram().save("solution.png")
+    print("ADJ nonogram fitness: ", adj_nonogram.fitness)
 
     t1 = time.time()
-    file = open('nonogram.log', 'a')
-    file.write("Running time: " + str(t1 - t0) + "\n")
-    # file.write("POPULATION GENERATION METHOD " + str(mode) + "\n")
+    file.write("TOTAL Running time: " + str(t1 - t0) + "\n")
     file.write("POPULATION_SIZE " + str(POPULATION_SIZE) + "\n")
+    file.write("CROSSOVER_RATE " + str(CROSSOVER_RATE) + "\n")
     file.write("GEN_ITERATIONS " + str(GEN_ITERATIONS) + "\n")
-    # file.write("REJECTION_RATE " + str(REJECTION_PERCENTAGE) + "\n")
+    file.write("EXPERT_THRESHOLD " + str(EXPERT_THRESHOLD) + "\n")
     file.write("MUTATION_RATE " + str(MUTATION_RATE) + "\n")
-    # file.write("\nSQUARE_PENALTY " + str(SQUARE_PENALTY) + "\n")
-    # file.write("GROUP_PENALTY " + str(GROUP_PENALTY) + "\n")
-    file.write("WISDOM_TRHESHOLD " + str(THRESHOLD) + "\n")
-    file.write("END RUN\n\n")
+    file.write("WOAC_UPPER_TRHESHOLD " + str(WOAC_UPPER_THRESHOLD) + "\n")
+    file.write("WOAC_LOWER_TRHESHOLD " + str(WOAC_LOWER_THRESHOLD) + "\n")
+    file.write("<----------END RUN---------->\n\n")
     file.close()
 
 
-ga_woc(POPULATION_SIZE, ROW_CONSTRAINTS, COL_CONSTRAINTS)
+ga_woac(POPULATION_SIZE, ROW_CONSTRAINTS, COL_CONSTRAINTS)
