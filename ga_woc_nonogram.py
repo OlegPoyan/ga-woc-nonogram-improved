@@ -447,6 +447,151 @@ def ga_algorithm(population_size, row_constraints, col_constraints, mode,
                     'nono')
     return population[:int(EXPERT_THRESHOLD * (len(population)))]
 
+def ga_mutate(population, rate):
+    """ Mutation function. Has a chance to mutate each row or column of each board in the population
+    depending on the mode being used"""
+    for i in range(0, len(population)):
+        # means we are in ROW_MODE
+        if population[i].mode == ROW_MODE:
+            mutate_row(population[i], rate)
+
+        # means we are in COL_MODE
+        elif population[i].mode == COL_MODE:
+            mutate_col(population[i], rate)
+
+        # means we are in RAND_MODE
+        else:
+            mutate_row(population[i], rate)
+
+
+
+def mutate_col(board, rate):
+    """Function to mutate a board while in COLUMN_MODE"""
+    for i in range(0, len(board.col_constraints)):
+        chance = float(randint(0, 1000))
+        chance /= 1000
+        if (chance <= rate):
+            # mutate a column
+            # encodes into a smaller format
+            encode = []
+            groupFlag = False
+            for j in range(0, len(board.row_constraints)):
+                if groupFlag == False:
+                    if board.grid[j][i] == 1:
+                        groupFlag = True
+                        encode.append(1)
+                    elif board.grid[j][i] == 0:
+                        encode.append(0)
+                else:
+                    if board.grid[j][i] == 0:
+                        groupFlag = False
+                        encode.append(0)
+            # select random position to swap
+            pos1 = randint(0, len(encode))
+            pos2 = randint(0, len(encode))
+            while pos1 == pos2:
+                pos2 = randint(0, len(encode))
+
+            # swap values
+            temp = encode[pos1]
+            encode[pos1] = encode[pos2]
+            encode[pos2] = temp
+
+            # check to make sure no rules are violated
+            for k in encode:
+                groupFlag2 = False
+                if groupFlag2 == False:
+                    if k == 1:
+                        groupFlag2 == True
+
+                else:
+                    if k == 1:
+                        # violation has occurred, two groups without separating white square
+                        return
+                    else:
+                        groupFlag2 = False
+
+            # decode
+            board_column = []
+            current_group = 0
+            for l in encode:
+                if l == 0:
+                    board_column.append(0)
+                else:
+                    for i in range(0, board.col_constraints[i][current_group]):
+                        board_column.append(1)
+                        current_group += 1
+
+            for m in range(0, len(board.row_constraints)):
+                board.grid[m][i] = board_column[m]
+
+            # recalculate fitness
+            board.calc_fitness(board.grid, board.row_constraints, board.col_constraints, board.mode, board.weights)
+
+
+
+def mutate_row(board, rate):
+    """Function to mutate a board while in ROW_MODE, Also used for RAND_MODE"""
+    for i in range(0, len(board.row_constraints)):
+        chance = float(randint(0, 1000))
+        chance /= 1000
+        if (chance <= rate):
+            # mutate a column
+            # encodes into a smaller format
+            encode = []
+            groupFlag = False
+            for j in range(0, len(board.col_constraints)):
+                if groupFlag == False:
+                    if board.grid[i][j] == 1:
+                        groupFlag = True
+                        encode.append(1)
+                    elif board.grid[i][j] == 0:
+                        encode.append(0)
+                else:
+                    if board.grid[i][j] == 0:
+                        groupFlag = False
+                        encode.append(0)
+            # select random position to swap
+            pos1 = randint(0, len(encode))
+            pos2 = randint(0, len(encode))
+            while pos1 == pos2:
+                pos2 = randint(0, len(encode))
+
+            # swap values
+            temp = encode[pos1]
+            encode[pos1] = encode[pos2]
+            encode[pos2] = temp
+
+            # check to make sure no rules are violated
+            for k in encode:
+                groupFlag2 = False
+                if groupFlag2 == False:
+                    if k == 1:
+                        groupFlag2 == True
+
+                else:
+                    if k == 1:
+                        # violation has occurred, two groups without separating white square
+                        return
+                    else:
+                        groupFlag2 = False
+
+            # decode
+            board_row = []
+            current_group = 0
+            for l in encode:
+                if l == 0:
+                    board_row.append(0)
+                else:
+                    for i in range(0, board.row_constraints[i][current_group]):
+                        board_row.append(1)
+                        current_group += 1
+
+            for m in range(0, len(board.col_constraints)):
+                board.grid[i][m] = board_row[m]
+
+            # recalculate fitness
+            board.calc_fitness(board.grid, board.row_constraints, board.col_constraints, board.mode, board.weights)
 
 def woac_aggregate(crowd):
     """Returns grid filled with percentages of squares crowd aggrees or not
